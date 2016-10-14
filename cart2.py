@@ -23,12 +23,6 @@ def main():
 class Agnet():
 
     def __init__(self, env):
-        self._LAST_STATE_IDX = 0
-        self._ACTION_IDX = 1
-        self._REWARD_IDX = 2
-        self._CURR_STATE_IDX = 3
-        self._TERMINAL_IDX = 4
-
         obs_space = env.observation_space.shape[0]
         self.total_reward = 0.0
         self.env = env
