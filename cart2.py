@@ -1,13 +1,15 @@
 # based on https://github.com/FlankMe/general-gym-player/blob/master/GeneralGymPlayerWithTF.py
-import gym, numpy, tensorflow as tf
+import gym, numpy as np, tensorflow as tf
 
 def main():
     env = gym.make('CartPole-v0')
     env.reset()
 
     agent = Agnet(env)
-    reward, done = 0, False
-    for i in range(5):
+
+    reward, done = 0.0, False
+    for i in range(1,200):
+        if i == 25: print("****STARTING TRAINGING****")
         observation, done = env.reset(), False
         action = agent.act(observation, reward, done, i)
         while not done:
@@ -21,38 +23,76 @@ def main():
 class Agnet():
 
     def __init__(self, env):
+        self._LAST_STATE_IDX = 0
+        self._ACTION_IDX = 1
+        self._REWARD_IDX = 2
+        self._CURR_STATE_IDX = 3
+        self._TERMINAL_IDX = 4
+
         obs_space = env.observation_space.shape[0]
-        self.total_reward = 0
+        self.total_reward = 0.0
         self.env = env
         self.nn = FFNN([obs_space, 25*obs_space, 25*obs_space, env.action_space.n])
+        self._nn = self.nn
         self.eps = 1.0
         self.eps_decay = 0.98
         self.eps_min = 0.1
         self.previous_observations = []
         self.last_action = np.zeros(env.action_space.n)
         self.last_state = None
+        self.batch_size = 128
+        self.list_rewards = []
 
-    def act(self, observation, reward, done, i):
+
+    def act(self, obs, reward, done, ep):
         self.total_reward+=reward
 
         if done:
-            print(self.total_reward)
-            self.total_reward = 0
+            self.list_rewards.append(self.total_reward)
             self.eps = max(self.eps*self.eps_decay,self.eps_min)
+            print("ep: {3}, total rw: {0} avg rw: {1}, e: {2}".format(self.total_reward,np.mean(self.list_rewards[-100:]),self.eps, ep))
+            self.total_reward = 0
 
-        new_observation = [self.last_state, self.last_action, reward, done]
+        current_state = obs.reshape((1, len(obs)))
+
+        if self.last_state is None:
+            self.last_state = current_state
+            q = self.nn.predict(current_state)
+            next_action = np.argmax(q)
+            self.last_action = np.zeros(self.env.action_space.n)
+            self.last_action[next_action] = 1
+            return next_action
+
+        new_observation = [self.last_state.copy(), self.last_action.copy(), reward, current_state.copy(), done]
         self.previous_observations.append(new_observation)
-        if len(self.previous_observations)>50000: self.previous_observations.pop(0)
+        self.last_state = current_state.copy()
+        while len(self.previous_observations)>50000: self.previous_observations.pop(0)
 
-        if np.random.random() < self.eps:
-            next_action = self.env.action_space.sample()
+        if ep > 25:
+
+            self.train()
+
+            if np.random.random() < self.eps:
+                next_action = np.random.randint(0,self.env.action_space.n)
+            else:
+                q = self.nn.predict(self.last_state)
+                next_action = np.argmax(q)
         else:
-            next_action = self.nn.predict()
+            next_action = np.random.randint(0,self.env.action_space.n)
 
-
-
-
+        self.last_action = np.zeros(self.env.action_space.n)
+        self.last_action[next_action]=1
         return next_action
+
+    def train(self):
+        batch = np.random.permutation(len(self.previous_observations))[:self.batch_size]
+        states = np.concatenate([self.previous_observations[i][0] for i in batch],axis=0)
+        actions = np.concatenate([[self.previous_observations[i][1]] for i in batch],axis=0)
+        rewards = np.array([self.previous_observations[i][2] for i in batch]).astype("float")
+        current_states = np.concatenate([self.previous_observations[i][3] for i in batch],axis=0)
+        done = np.array([self.previous_observations[i][4] for i in batch]).astype("bool")
+        target = rewards.copy()+(1.0-done)*0.99*(self.nn.predict(current_states).max(axis=1))
+        self.nn.fit(states,actions,target)
 
 class FFNN():
 
@@ -82,8 +122,7 @@ class FFNN():
         self.target = tf.placeholder("float", [None])
         self.action_value_vector = tf.reduce_sum(tf.mul(self.state_value_layer,self.actions),1)
         self.cost = tf.reduce_sum(tf.square(self.target - self.action_value_vector))
-        self.alpha = tf.constant(1e-3)
-        self.optimizer = tf.train.AdamOptimizer(self.alpha).minimize(self.cost)
+        self.optimizer = tf.train.AdamOptimizer(1e-3).minimize(self.cost)
 
         self.session.run(tf.initialize_all_variables())
         self.feed_forward = lambda state: self.session.run(self.state_value_layer, feed_dict={self.input_layer: state})
@@ -101,8 +140,6 @@ class FFNN():
 
     def predict(self, state):
         return self.feed_forward(state)
-
-
 
 if __name__=="__main__":
    main()
