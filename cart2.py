@@ -1,3 +1,4 @@
+# based on https://github.com/FlankMe/general-gym-player/blob/master/GeneralGymPlayerWithTF.py
 import gym, numpy, tensorflow as tf
 
 def main():
